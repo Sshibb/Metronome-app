@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Метроном</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .metronome {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        
+        .bpm-display {
+            font-size: 72px;
+            font-weight: bold;
+            color: #333;
+            margin: 20px 0;
+        }
+        
+        .bpm-label {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            margin: 20px 0;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+        }
+        
+        button.running {
+            background: #ff4757;
+        }
+        
+        .beat-indicator {
+            width: 30px;
+            height: 30px;
+            background: #ddd;
+            border-radius: 50%;
+            margin: 20px auto;
+            transition: background 0.1s;
+        }
+        
+        .beat-indicator.active {
+            background: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="metronome">
+        <h1>Метроном</h1>
+        <div class="beat-indicator" id="beatIndicator"></div>
+        <div class="bpm-display" id="bpmDisplay">120</div>
+        <div class="bpm-label">BPM</div>
+        
+        <input type="range" id="tempoSlider" 
+               min="20" max="300" value="120" step="1">
+        
+        <div>
+            <button id="minusTen">-10</button>
+            <button id="minusOne">-1</button>
+            <button id="startStop">Старт</button>
+            <button id="plusOne">+1</button>
+            <button id="plusTen">+10</button>
+        </div>
+        
+        <div style="margin-top: 10px;">
+            <button id="tapTempo">Tap Tempo</button>
+        </div>
+    </div>
+
+    <script>
+        class Metronome {
+            constructor() {
+                this.audioContext = null;
+                this.bpm = 120;
+                this.running = false;
+                this.timer = null;
+                this.nextBeatTime = 0;
+                this.tapTimes = [];
+                
+                this.initializeElements();
+                this.setupEventListeners();
+            }
+            
+            initializeElements() {
+                this.bpmDisplay = document.getElementById('bpmDisplay');
+                this.tempoSlider = document.getElementById('tempoSlider');
+                this.startStopBtn = document.getElementById('startStop');
+                this.beatIndicator = document.getElementById('beatIndicator');
+            }
+            
+            setupEventListeners() {
+                this.tempoSlider.addEventListener('input', (e) => {
+                    this.bpm = parseInt(e.target.value);
+                    this.updateDisplay();
+                });
+                
+                this.startStopBtn.addEventListener('click', () => {
+                    this.toggle();
+                });
+                
+                document.getElementById('minusTen').addEventListener('click', () => this.adjustBPM(-10));
+                document.getElementById('minusOne').addEventListener('click', () => this.adjustBPM(-1));
+                document.getElementById('plusOne').addEventListener('click', () => this.adjustBPM(1));
+                document.getElementById('plusTen').addEventListener('click', () => this.adjustBPM(10));
+                
+                document.getElementById('tapTempo').addEventListener('click', () => this.tapTempo());
+                
+                // Клавиши управления
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space') {
+                        e.preventDefault();
+                        this.toggle();
+                    } else if (e.code === 'ArrowUp') {
+                        this.adjustBPM(1);
+                    } else if (e.code === 'ArrowDown') {
+                        this.adjustBPM(-1);
+                    }
+                });
+            }
+            
+            updateDisplay() {
+                this.bpmDisplay.textContent = this.bpm;
+                this.tempoSlider.value = this.bpm;
+            }
+            
+            adjustBPM(delta) {
+                this.bpm = Math.max(20, Math.min(300, this.bpm + delta));
+                this.updateDisplay();
+            }
+            
+            toggle() {
+                if (this.running) {
+                    this.stop();
+                } else {
+                    this.start();
+                }
+            }
+            
+            start() {
+                if (!this.audioContext) {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                
+                this.running = true;
+                this.startStopBtn.textContent = 'Стоп';
+                this.startStopBtn.classList.add('running');
+                this.nextBeatTime = this.audioContext.currentTime;
+                this.scheduleBeat();
+            }
+            
+            stop() {
+                this.running = false;
+                this.startStopBtn.textContent = 'Старт';
+                this.startStopBtn.classList.remove('running');
+                if (this.timer) {
+                    clearTimeout(this.timer);
+                }
+            }
+            
+            scheduleBeat() {
+                if (!this.running) return;
+                
+                const interval = 60.0 / this.bpm;
+                
+                while (this.nextBeatTime < this.audioContext.currentTime + 0.1) {
+                    this.playClick(this.nextBeatTime);
+                    this.nextBeatTime += interval;
+                }
+                
+                this.timer = setTimeout(() => this.scheduleBeat(), 25);
+            }
+            
+            playClick(time) {
+                const osc = this.audioContext.createOscillator();
+                const gain = this.audioContext.createGain();
+                
+                osc.connect(gain);
+                gain.connect(this.audioContext.destination);
+                
+                osc.frequency.value = 1000;
+                gain.gain.value = 0.5;
+                
+                osc.start(time);
+                gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+                osc.stop(time + 0.05);
+                
+                // Визуальный индикатор
+                this.beatIndicator.classList.add('active');
+                setTimeout(() => {
+                    this.beatIndicator.classList.remove('active');
+                }, 100);
+            }
+            
+            tapTempo() {
+                const now = Date.now();
+                this.tapTimes.push(now);
+                
+                // Оставляем только последние 5 нажатий
+                if (this.tapTimes.length > 5) {
+                    this.tapTimes.shift();
+                }
+                
+                if (this.tapTimes.length >= 2) {
+                    let totalInterval = 0;
+                    for (let i = 1; i < this.tapTimes.length; i++) {
+                        totalInterval += this.tapTimes[i] - this.tapTimes[i-1];
+                    }
+                    
+                    const avgInterval = totalInterval / (this.tapTimes.length - 1);
+                    this.bpm = Math.round(60000 / avgInterval);
+                    this.updateDisplay();
+                }
+            }
+        }
+        
+        // Запуск метронома
+        const metronome = new Metronome();
+    </script>
+</body>
+</html>
